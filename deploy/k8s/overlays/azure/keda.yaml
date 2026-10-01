@@ -1,0 +1,39 @@
+# Scale the examiner worker on Kafka consumer lag (KEDA is an AKS add-on).
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: eventhubs-kafka-auth
+spec:
+  secretTargetRef:
+    - { parameter: sasl, name: keda-kafka-sasl, key: sasl }
+    - { parameter: username, name: keda-kafka-sasl, key: username }
+    - { parameter: password, name: lc-examiner-secrets, key: eventhubs-connection-string }
+    - { parameter: tls, name: keda-kafka-sasl, key: tls }
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: keda-kafka-sasl
+type: Opaque
+stringData:
+  sasl: plaintext
+  username: $ConnectionString
+  tls: enable
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: lc-examiner-worker
+spec:
+  scaleTargetRef: { name: lc-examiner-worker }
+  minReplicaCount: 1
+  maxReplicaCount: 3          # never more consumers than partitions
+  cooldownPeriod: 120
+  triggers:
+    - type: kafka
+      authenticationRef: { name: eventhubs-kafka-auth }
+      metadata:
+        bootstrapServers: <EVENTHUBS_NAMESPACE>.servicebus.windows.net:9093
+        consumerGroup: lc-examiner
+        topic: trade.lc.presentations
+        lagThreshold: "20"

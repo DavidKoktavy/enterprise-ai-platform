@@ -1,0 +1,38 @@
+# Local cluster (kind / minikube): in-cluster single-node Kafka + mock LLM provider.
+#   kind create cluster --name ai-platform
+#   make kind-deploy
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: ai-platform
+resources:
+  - ../../base
+  - kafka.yaml
+patches:
+  - target: { kind: Deployment, name: ai-gateway }
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value: { name: FORCE_MOCK_PROVIDER, value: "true" }
+      - op: replace
+        path: /spec/replicas
+        value: 1
+  - target: { kind: HorizontalPodAutoscaler, name: ai-gateway }
+    patch: |-
+      - op: replace
+        path: /spec/minReplicas
+        value: 1
+secretGenerator:
+  - name: ai-gateway-secrets
+    literals:
+      - tenant-key-trade-finance=dev-trade-finance-key
+      - tenant-key-retail-chatbot=dev-retail-key
+  - name: lc-examiner-secrets
+    literals:
+      - gateway-api-key=dev-trade-finance-key
+images:
+  - name: ai-gateway
+    newName: ai-gateway
+    newTag: dev
+  - name: lc-examiner
+    newName: lc-examiner
+    newTag: dev

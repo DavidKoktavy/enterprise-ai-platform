@@ -1,0 +1,87 @@
+# Zero-trust inside the namespace: deny everything, then allow explicitly.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+# DNS for everyone
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector: {}
+          podSelector: { matchLabels: { k8s-app: kube-dns } }
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+---
+# Only labelled clients may call the gateway (plus the ingress / monitoring namespaces)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: gateway-ingress
+spec:
+  podSelector: { matchLabels: { app: ai-gateway } }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: { matchLabels: { ai-gateway-client: "true" } }
+        - namespaceSelector: { matchLabels: { ai-gateway-access: "true" } }
+      ports: [{ protocol: TCP, port: 8080 }]
+---
+# Gateway egress: Azure OpenAI + Event Hubs via private endpoints (VNet range), Kafka in-cluster
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: gateway-egress
+spec:
+  podSelector: { matchLabels: { app: ai-gateway } }
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock: { cidr: 10.20.0.0/16 }   # private-endpoint subnet range (see infra/terraform)
+      ports:
+        - { protocol: TCP, port: 443 }    # Azure OpenAI, Entra ID token endpoint via firewall
+        - { protocol: TCP, port: 9093 }   # Event Hubs Kafka endpoint
+    - to:
+        - podSelector: { matchLabels: { app: kafka } }
+      ports: [{ protocol: TCP, port: 9092 }]
+---
+# Examiner may only talk to the gateway and Kafka — never to an LLM directly
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: examiner-egress
+spec:
+  podSelector: { matchLabels: { ai-gateway-client: "true" } }
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector: { matchLabels: { app: ai-gateway } }
+      ports: [{ protocol: TCP, port: 8080 }]
+    - to:
+        - podSelector: { matchLabels: { app: kafka } }
+      ports: [{ protocol: TCP, port: 9092 }]
+    - to:
+        - ipBlock: { cidr: 10.20.0.0/16 }
+      ports: [{ protocol: TCP, port: 9093 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: examiner-api-ingress
+spec:
+  podSelector: { matchLabels: { app: lc-examiner-api } }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector: { matchLabels: { ai-gateway-access: "true" } }
+      ports: [{ protocol: TCP, port: 8080 }]

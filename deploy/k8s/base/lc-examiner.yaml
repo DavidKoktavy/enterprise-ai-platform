@@ -1,0 +1,86 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lc-examiner-api
+  labels: { app: lc-examiner-api }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: lc-examiner-api }
+  template:
+    metadata:
+      labels: { app: lc-examiner-api, ai-gateway-client: "true" }
+    spec:
+      serviceAccountName: lc-examiner
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: api
+          image: lc-examiner
+          ports: [{ name: http, containerPort: 8080 }]
+          envFrom:
+            - configMapRef: { name: platform-config }
+          env:
+            - name: GATEWAY_API_KEY
+              valueFrom: { secretKeyRef: { name: lc-examiner-secrets, key: gateway-api-key, optional: true } }
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { memory: 256Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: lc-examiner
+spec:
+  selector: { app: lc-examiner-api }
+  ports: [{ name: http, port: 8080, targetPort: http }]
+---
+# Kafka worker: same image, different entrypoint. Scaled on consumer lag by
+# KEDA in the Azure overlay (replicas <= partition count of the input topic).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lc-examiner-worker
+  labels: { app: lc-examiner-worker }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: lc-examiner-worker }
+  template:
+    metadata:
+      labels: { app: lc-examiner-worker, ai-gateway-client: "true" }
+    spec:
+      serviceAccountName: lc-examiner
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 45   # finish in-flight batch, commit offsets
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: worker
+          image: lc-examiner
+          command: ["python", "-m", "app.worker"]
+          envFrom:
+            - configMapRef: { name: platform-config }
+          env:
+            - name: GATEWAY_API_KEY
+              valueFrom: { secretKeyRef: { name: lc-examiner-secrets, key: gateway-api-key, optional: true } }
+            - name: KAFKA_SASL_PASSWORD
+              valueFrom: { secretKeyRef: { name: lc-examiner-secrets, key: eventhubs-connection-string, optional: true } }
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { memory: 256Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }

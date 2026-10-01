@@ -1,0 +1,100 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-gateway
+  labels: { app: ai-gateway }
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
+  selector:
+    matchLabels: { app: ai-gateway }
+  template:
+    metadata:
+      labels: { app: ai-gateway }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: /metrics
+    spec:
+      serviceAccountName: ai-gateway
+      automountServiceAccountToken: true   # required for workload identity token exchange
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector: { matchLabels: { app: ai-gateway } }
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: gateway
+          image: ai-gateway
+          ports: [{ name: http, containerPort: 8080 }]
+          envFrom:
+            - configMapRef: { name: platform-config }
+          env:
+            - name: REGISTRY_PATH
+              value: /etc/gateway/models.yaml
+            - name: AZURE_OPENAI_ENDPOINT
+              valueFrom: { secretKeyRef: { name: ai-gateway-secrets, key: azure-openai-endpoint, optional: true } }
+            - name: KAFKA_SASL_PASSWORD
+              valueFrom: { secretKeyRef: { name: ai-gateway-secrets, key: eventhubs-connection-string, optional: true } }
+            - name: TENANT_KEY_TRADE_FINANCE
+              valueFrom: { secretKeyRef: { name: ai-gateway-secrets, key: tenant-key-trade-finance, optional: true } }
+            - name: TENANT_KEY_RETAIL_CHATBOT
+              valueFrom: { secretKeyRef: { name: ai-gateway-secrets, key: tenant-key-retail-chatbot, optional: true } }
+          volumeMounts:
+            - { name: registry, mountPath: /etc/gateway, readOnly: true }
+            - { name: tmp, mountPath: /tmp }
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests: { cpu: 200m, memory: 256Mi }
+            limits: { memory: 512Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+      volumes:
+        - name: registry
+          configMap: { name: gateway-model-registry }
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-gateway
+spec:
+  selector: { app: ai-gateway }
+  ports: [{ name: http, port: 8080, targetPort: http }]
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ai-gateway
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: ai-gateway }
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource: { name: cpu, target: { type: Utilization, averageUtilization: 70 } }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: ai-gateway
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: { app: ai-gateway }

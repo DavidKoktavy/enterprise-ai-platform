@@ -1,0 +1,4 @@
+prefix         = "aiplat"
+environment    = "dev"
+location       = "swedencentral"
+aks_node_count = 3

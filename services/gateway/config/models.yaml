@@ -1,0 +1,75 @@
+# Model registry — the single source of truth for which LLMs the bank may use,
+# for what data, by whom, and at what cost. Changes go through PR review
+# (see docs/ai-standards.md §3 "Model lifecycle").
+#
+# data_classification ladder (lowest -> highest):
+#   public < internal < confidential < strictly_confidential
+# A request may only be routed to a model whose max_classification >= request classification.
+
+models:
+  - alias: chat-default
+    description: General-purpose assistant model for internal use
+    provider: azure_openai
+    deployment: gpt-4o-mini
+    region: swedencentral
+    max_classification: confidential
+    context_window: 128000
+    cost_per_1k_input_tokens_eur: 0.00014
+    cost_per_1k_output_tokens_eur: 0.00055
+    fallback: chat-default-mock
+    status: active            # active | deprecated | blocked
+    owner: ai-platform-team
+
+  - alias: chat-reasoning
+    description: Higher-capability model for complex document analysis
+    provider: azure_openai
+    deployment: gpt-4o
+    region: swedencentral
+    max_classification: strictly_confidential
+    context_window: 128000
+    cost_per_1k_input_tokens_eur: 0.0023
+    cost_per_1k_output_tokens_eur: 0.0092
+    fallback: chat-default
+    status: active
+    owner: ai-platform-team
+
+  - alias: chat-default-mock
+    description: Deterministic offline model for local dev, CI and DR drills
+    provider: mock
+    deployment: mock-echo
+    region: local
+    max_classification: strictly_confidential
+    context_window: 32000
+    cost_per_1k_input_tokens_eur: 0
+    cost_per_1k_output_tokens_eur: 0
+    fallback: null
+    status: active
+    owner: ai-platform-team
+
+  - alias: legacy-gpt35
+    description: Retired — kept in registry so old callers get an explicit error
+    provider: azure_openai
+    deployment: gpt-35-turbo
+    region: westeurope
+    max_classification: internal
+    context_window: 16000
+    cost_per_1k_input_tokens_eur: 0.0005
+    cost_per_1k_output_tokens_eur: 0.0015
+    fallback: null
+    status: blocked
+    owner: ai-platform-team
+
+# Consumers (applications/teams) and what they are allowed to do.
+# In production the key is replaced by an Entra ID app registration (client_id);
+# API keys exist only for local development.
+tenants:
+  - id: trade-finance
+    api_key_env: TENANT_KEY_TRADE_FINANCE
+    allowed_models: [chat-default, chat-reasoning, chat-default-mock]
+    requests_per_minute: 120
+    monthly_budget_eur: 500
+  - id: retail-chatbot
+    api_key_env: TENANT_KEY_RETAIL_CHATBOT
+    allowed_models: [chat-default, chat-default-mock]
+    requests_per_minute: 600
+    monthly_budget_eur: 2000

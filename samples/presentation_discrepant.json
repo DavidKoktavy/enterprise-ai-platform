@@ -1,0 +1,70 @@
+{
+  "lc": {
+    "lc_number": "CS-LC-2026-00417",
+    "issue_date": "2026-08-03",
+    "expiry_date": "2026-10-30",
+    "currency": "EUR",
+    "amount": "248000.00",
+    "amount_tolerance_pct": "5",
+    "applicant": "Moravia Steelworks a.s.",
+    "beneficiary": "Hanseatic Machine Tools GmbH",
+    "port_of_loading": "Hamburg",
+    "port_of_discharge": "Koper",
+    "latest_shipment_date": "2026-09-25",
+    "partial_shipments_allowed": false,
+    "transhipment_allowed": false,
+    "presentation_period_days": 21,
+    "incoterm": "CIF",
+    "goods_description": "2 (two) units CNC 5-axis machining centre model HMT-500, new, incl. tooling and installation manual",
+    "required_documents": [
+      "commercial invoice",
+      "bill of lading",
+      "insurance certificate",
+      "packing list",
+      "certificate of origin"
+    ]
+  },
+  "presentation": {
+    "presentation_id": "PRES-0002",
+    "lc_number": "CS-LC-2026-00417",
+    "presentation_date": "2026-10-20",
+    "shipment_count": 1,
+    "documents_presented": [
+      "Commercial Invoice",
+      "Bill of Lading",
+      "Insurance Certificate",
+      "Packing List"
+    ],
+    "invoice": {
+      "issuer": "Hanseatic Machine Tools GmbH",
+      "addressee": "Moravia Steelworks a.s.",
+      "currency": "EUR",
+      "amount": "262000.00",
+      "goods_description": "2 units CNC 3-axis milling machine model HMT-300, refurbished"
+    },
+    "bill_of_lading": {
+      "on_board_date": "2026-09-22",
+      "port_of_loading": "Hamburg",
+      "port_of_discharge": "Koper",
+      "transhipment": false,
+      "clean": false,
+      "clauses": [
+        "2 crates damaged, contents unchecked"
+      ]
+    },
+    "insurance": {
+      "currency": "EUR",
+      "amount": "270000.00",
+      "effective_date": "2026-09-22"
+    }
+  },
+  "mock_llm_response": {
+    "findings": [
+      {
+        "ucp_article": "18(c)",
+        "severity": "discrepancy",
+        "message": "Invoice describes 3-axis HMT-300 refurbished machines; credit calls for new 5-axis HMT-500 machining centres."
+      }
+    ]
+  }
+}

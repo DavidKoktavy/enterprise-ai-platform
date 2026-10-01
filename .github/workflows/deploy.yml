@@ -1,0 +1,72 @@
+# Manual deployment to Azure. Uses OIDC federation (no client secrets in GitHub):
+# create an Entra app with a federated credential for this repo and set
+# AZURE_CLIENT_ID / AZURE_TENANT_ID / AZURE_SUBSCRIPTION_ID as repo variables.
+name: deploy-azure
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        type: choice
+        options: [dev]
+        default: dev
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    env:
+      ARM_USE_OIDC: "true"
+      ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - uses: hashicorp/setup-terraform@v3
+        with: { terraform_wrapper: false }
+
+      - name: Terraform apply
+        working-directory: infra/terraform
+        run: |
+          terraform init
+          terraform apply -auto-approve -var environment=${{ inputs.environment }}
+          terraform output -json > ../../tf.json
+
+      - name: Build & push images to ACR
+        run: |
+          ACR=$(jq -r .acr_name.value tf.json)
+          az acr login -n "$ACR"
+          for s in gateway:ai-gateway lc-examiner:lc-examiner; do
+            dir=${s%%:*}; img=${s##*:}
+            docker build -t "$ACR.azurecr.io/$img:${{ github.sha }}" services/$dir
+            docker push "$ACR.azurecr.io/$img:${{ github.sha }}"
+          done
+
+      - name: Render overlay with Terraform outputs
+        run: |
+          o() { jq -r ".$1.value" tf.json; }
+          cd deploy/k8s/overlays/azure
+          sed -i \
+            -e "s|<EVENTHUBS_NAMESPACE>|$(o eventhubs_namespace)|g" \
+            -e "s|<GATEWAY_IDENTITY_CLIENT_ID>|$(o gateway_identity_client_id)|g" \
+            -e "s|<KEY_VAULT_NAME>|$(o key_vault_name)|g" \
+            -e "s|<TENANT_ID>|$(o tenant_id)|g" \
+            -e "s|<ACR_NAME>|$(o acr_name)|g" \
+            -e "s|newTag: latest|newTag: ${{ github.sha }}|g" \
+            *.yaml
+
+      - name: Deploy to AKS
+        run: |
+          az aks get-credentials -g "$(jq -r .resource_group.value tf.json)" -n "$(jq -r .aks_name.value tf.json)"
+          az aks install-cli && kubelogin convert-kubeconfig -l azurecli
+          kubectl kustomize --load-restrictor LoadRestrictionsNone deploy/k8s/overlays/azure | kubectl apply -f -
+          kubectl -n ai-platform rollout status deploy/ai-gateway --timeout=180s

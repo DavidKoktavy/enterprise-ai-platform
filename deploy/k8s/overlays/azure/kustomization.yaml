@@ -1,0 +1,64 @@
+# Production-like AKS deployment:
+#  * Azure OpenAI over private endpoint, Entra ID auth via Workload Identity (no keys)
+#  * Azure Event Hubs (Kafka protocol) instead of self-managed Kafka
+#  * Secrets from Key Vault via Secrets Store CSI driver
+#  * KEDA scales the Kafka worker on consumer lag
+# Values in <> are filled by `terraform output` in CI (see .github/workflows/deploy.yml).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: ai-platform
+resources:
+  - ../../base
+  - secret-provider.yaml
+  - keda.yaml
+configMapGenerator:
+  - name: platform-config
+    behavior: merge
+    literals:
+      - KAFKA_BOOTSTRAP=<EVENTHUBS_NAMESPACE>.servicebus.windows.net:9093
+      - KAFKA_SECURITY_PROTOCOL=SASL_SSL
+      - AZURE_OPENAI_API_VERSION=2024-10-21
+patches:
+  - target: { kind: ServiceAccount, name: ai-gateway }
+    patch: |-
+      - op: add
+        path: /metadata/annotations
+        value:
+          azure.workload.identity/client-id: <GATEWAY_IDENTITY_CLIENT_ID>
+  - target: { kind: Deployment, name: ai-gateway }
+    patch: |-
+      - op: add
+        path: /spec/template/metadata/labels/azure.workload.identity~1use
+        value: "true"
+      - op: add
+        path: /spec/template/spec/volumes/-
+        value:
+          name: kv-secrets
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes: { secretProviderClass: ai-gateway-kv }
+      - op: add
+        path: /spec/template/spec/containers/0/volumeMounts/-
+        value: { name: kv-secrets, mountPath: /mnt/secrets, readOnly: true }
+  - target: { kind: Deployment, name: lc-examiner-worker }
+    patch: |-
+      - op: add
+        path: /spec/template/spec/volumes
+        value:
+          - name: kv-secrets
+            csi:
+              driver: secrets-store.csi.k8s.io
+              readOnly: true
+              volumeAttributes: { secretProviderClass: lc-examiner-kv }
+      - op: add
+        path: /spec/template/spec/containers/0/volumeMounts
+        value:
+          - { name: kv-secrets, mountPath: /mnt/secrets, readOnly: true }
+images:
+  - name: ai-gateway
+    newName: <ACR_NAME>.azurecr.io/ai-gateway
+    newTag: latest
+  - name: lc-examiner
+    newName: <ACR_NAME>.azurecr.io/lc-examiner
+    newTag: latest
