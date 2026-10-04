@@ -173,9 +173,7 @@ or run the `deploy-azure` GitHub workflow (OIDC federation — set `AZURE_CLIENT
 
 ## Author
 
-**David Koktavý** — investment operations (equity & derivatives) at FNZ; final-year law
-student (International Business Law, Masaryk University) writing a thesis on electronic
-letters of credit and trade-finance digitalisation (eUCP, UCP 600, MLETR, Czech Act No. 31/2025 Coll.).
+**David Koktavý** 
 
 ## License
 
